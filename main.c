@@ -145,12 +145,9 @@ void grayscale(Image *img)
 }
 
 int main() {
-    Image image = LoadImage("image.png");
+    Image image = LoadImage("Ada_lovelace.png");
 
     ImageFormat(&image, PIXELFORMAT_UNCOMPRESSED_R8G8B8A8);
-
-    grayscale(&image);
-    add_noise(&image, 1.0f, 10);
 
     generate_means(means);
 
