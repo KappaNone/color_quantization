@@ -8,114 +8,164 @@
 #define NOB_IMPLEMENTATION
 #include "nob.h"
 
-#define SCREEN_WIDTH 1600
-#define SCREEN_HEIGHT 1200
-#define K 10
+#define SCREEN_WIDTH 800
+#define SCREEN_HEIGHT 600
 
 typedef struct {
-    Vector2 *items;
+    Color *items;
     size_t count;
     size_t capacity;
-    Color color;
-} Points;
+} Colors;
 
-void generate_cluster(Points *points, int points_count, Vector2 center, int size) {
-    for (int i = 0; i < points_count; ++i) {
-        Vector2 point = {
-            GetRandomValue(center.x-size/2, center.x+size/2), 
-            GetRandomValue(center.y-size/2, center.y+size/2)
-        };
-        da_append(points, point);
-    }
-}
+#define K 12
+static Colors clusters[K] = {0};
+static Color means[K] = {0};
 
-void generate_means(Vector2 *means) {
+void generate_means(Color *means) {
     for (int i = 0; i < K; i++) {
-        Vector2 mean = {
-            GetRandomValue(0, SCREEN_WIDTH),
-            GetRandomValue(0, SCREEN_HEIGHT)
+        Color mean = {
+            GetRandomValue(0, 255),
+            GetRandomValue(0, 255),
+            GetRandomValue(0, 255),
+            255
         };
         means[i] = mean;
     }
 }
 
-void recluster_state(Points points, Vector2 means[], Points *clusters) {
+size_t find_closest_mean(Color color, Color means[]) {
+    Vector3 point = {color.r, color.g, color.b};
+    size_t closest_mean = 0;
+
+    for (size_t k = 0; k < K-1; ++k) {
+        Vector3 m0 = { means[closest_mean].r, means[closest_mean].g, means[closest_mean].b };
+        Vector3 m1 = { means[k + 1].r, means[k + 1].g, means[k + 1].b };
+
+        if (Vector3DistanceSqr(point, m0) > Vector3DistanceSqr(point, m1)) {
+            closest_mean = k+1;
+        }
+    } 
+
+    return closest_mean;
+}
+
+void recluster_pixels(Image image, Color means[], Colors *clusters) {
+    Color *pixels = (Color *)image.data;
+
     for (size_t i = 0; i < K; ++i) {
         clusters[i].count = 0;
     }
-    for (size_t i = 0; i < points.count; ++i) {
-        Vector2 point = points.items[i];
-        size_t closest_mean = 0;
-        for (size_t k = 0; k < K-1; ++k) {
-            if (Vector2DistanceSqr(point, means[closest_mean]) >
-                    Vector2DistanceSqr(point, means[k+1])) {
-                closest_mean = k+1;
-            }
-        } 
-        da_append(&clusters[closest_mean], point);
+
+    for (int i = 0; i < image.width*image.height; ++i) {
+        Color color = pixels[i];
+        size_t closest_mean = find_closest_mean(color, means);
+        da_append(&clusters[closest_mean], color);
     }
 }
 
-Vector2 get_centroid(Points points) {
-    if (points.count <= 0) return Vector2Zero();
-    float x_sum = 0;
-    float y_sum = 0;
+Color get_centroid(Colors points) {
+    if (points.count <= 0) return (Color){0, 0, 0, 0};
+
+    float r_sum = 0;
+    float g_sum = 0;
+    float b_sum = 0;
+
     for (size_t i = 0; i < points.count; ++i) {
-        x_sum += points.items[i].x;
-        y_sum += points.items[i].y;
+        r_sum += points.items[i].r;
+        g_sum += points.items[i].g;
+        b_sum += points.items[i].b;
     }
-    return (Vector2) {x_sum/points.count, y_sum/points.count};
+
+    return (Color) {r_sum/points.count, g_sum/points.count, b_sum/points.count, 255};
 }
 
-void update_means(Vector2 means[], Points clusters[]) {
+void update_means(Color means[], Colors clusters[]) {
     for (size_t i = 0; i < K; ++i) {
         means[i] = get_centroid(clusters[i]);
     }
 }
 
-static Points clusters[K] = {0};
-static Vector2 means[K] = {0};
-static Color colors[] = {
-    GOLD,
-    PINK,
-    MAROON,
-    LIME,
-    SKYBLUE,
-    VIOLET,
-};
-#define colors_count ARRAY_LEN(colors)
+void apply_means(Image *image, Color means[])
+{
+    Color *pixels = (Color *)image->data;
+    int total = image->width * image->height;
+
+    for (int i = 0; i < total; i++) {
+        int closest = find_closest_mean(pixels[i], means);
+
+        pixels[i] = means[closest];
+    }
+}
+
+static inline unsigned char clamp_u8(int v)
+{
+    return (v < 0) ? 0 : (v > 255 ? 255 : v);
+}
+
+void add_noise(Image *img, float intensity, int amount)
+{
+    if (!img || !img->data) return;
+
+    Color *pixels = (Color *)img->data;
+    int total = img->width * img->height;
+
+    for (int i = 0; i < total; i++)
+    {
+        if ((float)rand() / RAND_MAX < intensity)
+        {
+            int noise = (rand() % (amount * 2 + 1)) - amount;
+
+            pixels[i].r = clamp_u8(pixels[i].r + noise);
+            pixels[i].g = clamp_u8(pixels[i].g + noise);
+            pixels[i].b = clamp_u8(pixels[i].b + noise);
+        }
+    }
+}
+
+void grayscale(Image *img)
+{
+    if (!img || !img->data) return;
+
+    Color *pixels = (Color *)img->data;
+    int total = img->width * img->height;
+
+    for (int i = 0; i < total; i++)
+    {
+        unsigned char gray =
+            (unsigned char)(
+                pixels[i].r * 0.299f +
+                pixels[i].g * 0.587f +
+                pixels[i].b * 0.114f
+            );
+
+        pixels[i].r = gray;
+        pixels[i].g = gray;
+        pixels[i].b = gray;
+    }
+}
 
 int main() {
-    SetRandomSeed(time(NULL));
-    Points points = {0};
-    Vector2 center = {SCREEN_WIDTH/2, SCREEN_HEIGHT/2};
+    Image image = LoadImage("image.png");
 
-    generate_cluster(&points, 2000, center, SCREEN_HEIGHT);
+    ImageFormat(&image, PIXELFORMAT_UNCOMPRESSED_R8G8B8A8);
+
+    grayscale(&image);
+    add_noise(&image, 1.0f, 10);
+
     generate_means(means);
 
-    recluster_state(points, means, clusters);
-
-    InitWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "kmeans");
-    while (!WindowShouldClose()) {
-        BeginDrawing();
-        ClearBackground(GetColor(0x141414FF));
-        if (IsKeyPressed(KEY_R)) {
-            points.count = 0;
-            generate_cluster(&points, 2000, center, SCREEN_HEIGHT);
-            generate_means(means);
-            recluster_state(points, means, clusters);
-        }
-        if (IsKeyPressed(KEY_SPACE)) {
-            update_means(means, clusters);
-            recluster_state(points, means, clusters);
-        }
-        for (size_t i = 0; i < K; ++i) {
-            for (size_t k = 0; k < clusters[i].count; ++k) {
-                DrawCircleV(clusters[i].items[k], 5, colors[i%colors_count]);
-            }
-            DrawCircleV(means[i], 10, WHITE);
-        }
-        EndDrawing();
+    for (int i = 0; i < 20; i++) {
+        recluster_pixels(image, means, clusters);
+        update_means(means, clusters);
+        clusters[i].count = 0;
     }
+
+    apply_means(&image, means);
+
+    ExportImage(image, "output.png");
+
+    UnloadImage(image);
+
     return 0;
 }
+

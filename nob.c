@@ -14,6 +14,9 @@ int main(int argc, char **argv)
     cmd_append(&cmd, "-lgdi32");
     cmd_append(&cmd, "-lwinmm");
     cmd_append(&cmd, "-lmingw32");
+    String_Builder sb = { 0 };
+    
+    nob_cmd_render(cmd, &sb);
     if (!cmd_run(&cmd)) return 1;
     cmd_append(&cmd, "./main.exe");
     if (!cmd_run(&cmd)) return 1;
